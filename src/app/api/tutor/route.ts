@@ -53,6 +53,173 @@ No final absoluto da tua resposta, depois de todo o conteúdo visível,
 inclui uma linha com exatamente "---SCORING---" seguida de um único
 objeto JSON: {"score":3,"difficulty":"media","topics_covered":["Tópico"],"comprehension_estimate":"parcial","notes":"breve observação"}`;
 
+// ── BKT (Bayesian Knowledge Tracing) ────────────────────────────────
+/**
+ * Atualiza P(L_n) usando a fórmula standard de Bayesian Knowledge Tracing.
+ *
+ * Se o aluno acertou (correct = true):
+ *   P(L_n | correct) = P(L_n-1) * (1 - P(S)) / [ P(L_n-1) * (1 - P(S)) + (1 - P(L_n-1)) * P(G) ]
+ *
+ * Se o aluno errou (correct = false):
+ *   P(L_n | wrong) = P(L_n-1) * P(S) / [ P(L_n-1) * P(S) + (1 - P(L_n-1)) * (1 - P(G)) ]
+ *
+ * Depois aplica transição:
+ *   P(L_n) = P(L_n | obs) + (1 - P(L_n | obs)) * P(T)
+ */
+function bktUpdate(
+  pMastery: number,
+  pTransit: number,
+  pSlip: number,
+  pGuess: number,
+  correct: boolean,
+): number {
+  let posterior: number;
+  if (correct) {
+    const num = pMastery * (1 - pSlip);
+    const den = num + (1 - pMastery) * pGuess;
+    posterior = den > 0 ? num / den : pMastery;
+  } else {
+    const num = pMastery * pSlip;
+    const den = num + (1 - pMastery) * (1 - pGuess);
+    posterior = den > 0 ? num / den : pMastery;
+  }
+  // Transição: probabilidade de aprender após a interação
+  const updated = posterior + (1 - posterior) * pTransit;
+  // Clamp entre 0 e 1
+  return Math.max(0, Math.min(1, updated));
+}
+
+/**
+ * Mapeia score do Claude (1-5) para correct/incorrect no BKT.
+ * Score >= 3 é considerado "demonstrou compreensão" (correct).
+ * Adicionalmente mapeia comprehension_estimate.
+ */
+function scoreToCorrect(
+  snapshot: Record<string, unknown> | null,
+): boolean | null {
+  if (!snapshot) return null;
+  const score = Number(snapshot.score);
+  if (isNaN(score)) {
+    // Fallback para comprehension_estimate
+    const est = String(snapshot.comprehension_estimate ?? "").toLowerCase();
+    if (est === "boa" || est === "completa" || est === "good" || est === "complete") return true;
+    if (est === "fraca" || est === "nenhuma" || est === "poor" || est === "none") return false;
+    return null;
+  }
+  return score >= 3;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseAny = ReturnType<typeof createClient>;
+
+/**
+ * Resolve topic_id → concept_id via dkm_concepts.
+ * O código do conceito segue o padrão: {discipline_code}-{school_year}-{topic_code}
+ */
+async function resolveConceptId(
+  supabase: SupabaseAny,
+  topicId: string,
+): Promise<string | null> {
+  // Buscar o código do tópico
+  const { data: topic } = await supabase
+    .from("curriculum_topics")
+    .select("code, unit_id")
+    .eq("id", topicId)
+    .single() as { data: { code: string; unit_id: string } | null };
+  if (!topic?.code) return null;
+
+  // Buscar a unidade para chegar ao currículo
+  const { data: unit } = await supabase
+    .from("curriculum_units")
+    .select("curriculum_id")
+    .eq("id", topic.unit_id)
+    .single() as { data: { curriculum_id: string } | null };
+  if (!unit?.curriculum_id) return null;
+
+  // Buscar o currículo para obter discipline_code e school_year
+  const { data: cur } = await supabase
+    .from("curricula")
+    .select("discipline_code, school_year")
+    .eq("id", unit.curriculum_id)
+    .single() as { data: { discipline_code: string; school_year: string } | null };
+  if (!cur?.discipline_code || !cur?.school_year) return null;
+
+  // Construir o código do conceito e procurar
+  const conceptCode = `${cur.discipline_code}-${cur.school_year}-${topic.code}`;
+  const { data: concept } = await supabase
+    .from("dkm_concepts")
+    .select("id")
+    .eq("code", conceptCode)
+    .single() as { data: { id: string } | null };
+
+  return concept?.id ?? null;
+}
+
+/**
+ * Atualiza a mestria BKT do aluno após uma interação avaliada.
+ */
+async function updateMastery(
+  supabase: SupabaseAny,
+  studentId: string,
+  topicId: string | undefined,
+  snapshot: Record<string, unknown> | null,
+): Promise<void> {
+  if (!topicId || !snapshot) return;
+
+  const correct = scoreToCorrect(snapshot);
+  if (correct === null) return;
+
+  const conceptId = await resolveConceptId(supabase, topicId);
+  if (!conceptId) return;
+
+  // Ler mestria atual (ou usar defaults)
+  const { data: current } = await supabase
+    .from("student_mastery")
+    .select("p_mastery, p_transit, p_slip, p_guess, attempts, correct_attempts")
+    .eq("student_id", studentId)
+    .eq("concept_id", conceptId)
+    .maybeSingle() as {
+      data: {
+        p_mastery: number; p_transit: number; p_slip: number; p_guess: number;
+        attempts: number; correct_attempts: number;
+      } | null;
+    };
+
+  const prev = {
+    p_mastery: Number(current?.p_mastery ?? 0.1),
+    p_transit: Number(current?.p_transit ?? 0.1),
+    p_slip: Number(current?.p_slip ?? 0.1),
+    p_guess: Number(current?.p_guess ?? 0.2),
+    attempts: current?.attempts ?? 0,
+    correct_attempts: current?.correct_attempts ?? 0,
+  };
+
+  const newMastery = bktUpdate(
+    prev.p_mastery,
+    prev.p_transit,
+    prev.p_slip,
+    prev.p_guess,
+    correct,
+  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (supabase as any).from("student_mastery").upsert(
+    {
+      student_id: studentId,
+      concept_id: conceptId,
+      p_mastery: Math.round(newMastery * 10000) / 10000,
+      p_transit: prev.p_transit,
+      p_slip: prev.p_slip,
+      p_guess: prev.p_guess,
+      attempts: prev.attempts + 1,
+      correct_attempts: prev.correct_attempts + (correct ? 1 : 0),
+      last_attempted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "student_id,concept_id" },
+  );
+}
+
 // ── helpers ──────────────────────────────────────────────────────────
 function section(title: string, body: string): string {
   if (!body.trim()) return "";
@@ -396,6 +563,11 @@ export async function POST(req: NextRequest) {
         },
       ]);
     }
+
+    // Atualizar mestria BKT (fire-and-forget, não bloqueia a resposta)
+    updateMastery(supabase as SupabaseAny, student_id, topic_id, performanceSnapshot).catch(
+      (err) => console.error("[BKT] Erro ao atualizar mestria:", err),
+    );
 
     return NextResponse.json({
       session_id: tutorSessionId,
