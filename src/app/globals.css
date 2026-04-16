@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 215 25% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+
+    --primary: 215 65% 28%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 25% 92%;
+    --secondary-foreground: 215 25% 15%;
+
+    --muted: 210 15% 94%;
+    --muted-foreground: 215 15% 45%;
+
+    --accent: 40 85% 55%;
+    --accent-foreground: 215 25% 15%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 15% 88%;
+    --input: 215 15% 88%;
+    --ring: 215 65% 28%;
+
+    --radius: 0.75rem;
+  }
+
+  html, body {
+    @apply bg-background text-foreground;
+    font-family: 'Source Sans 3', 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: 'Source Serif 4', 'Georgia', serif;
+    letter-spacing: -0.01em;
+  }
+}
+
+@layer components {
+  .mastery-bar {
+    @apply h-2 rounded-full bg-secondary overflow-hidden;
+  }
+
+  .mastery-bar-fill {
+    @apply h-full rounded-full transition-all;
+  }
+}
