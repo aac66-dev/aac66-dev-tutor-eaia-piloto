@@ -119,6 +119,15 @@ export default async function StudentDashboardPage({ params }: PageProps) {
           </div>
         </section>
 
+        <section className="flex justify-center">
+          <a
+            href={`/aluno/${student.nickname}/sessao`}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
+          >
+            📚 Iniciar sessão de tutoria
+          </a>
+        </section>
+
         <section className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">
           <p>
             Nota, este é um perfil sintético gerado para efeitos de piloto. A

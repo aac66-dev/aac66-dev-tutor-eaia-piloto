@@ -214,6 +214,41 @@ export async function masteryForCurriculum(
 }
 
 /**
+ * Lista unidades e tópicos de um currículo, para seletor na área do aluno.
+ */
+export async function unitsAndTopics(
+  curriculumId: string,
+): Promise<
+  Array<{
+    unit: CurriculumUnit;
+    topics: CurriculumTopic[];
+  }>
+> {
+  const db = supabaseServer();
+  const { data: units, error: uErr } = await db
+    .from('curriculum_units')
+    .select('*')
+    .eq('curriculum_id', curriculumId)
+    .order('order_index');
+  if (uErr) throw uErr;
+
+  const unitIds = (units ?? []).map((u) => u.id);
+  if (unitIds.length === 0) return [];
+
+  const { data: topics, error: tErr } = await db
+    .from('curriculum_topics')
+    .select('*')
+    .in('unit_id', unitIds)
+    .order('order_index');
+  if (tErr) throw tErr;
+
+  return (units ?? []).map((u) => ({
+    unit: u,
+    topics: (topics ?? []).filter((t) => t.unit_id === u.id),
+  }));
+}
+
+/**
  * Mestria global agregada por aluno (média de todas as AE).
  */
 export async function studentOverallMastery(
