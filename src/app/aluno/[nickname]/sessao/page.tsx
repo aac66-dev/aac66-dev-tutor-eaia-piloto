@@ -30,10 +30,15 @@ interface UnitWithTopics {
   unit: UnitBasic;
   topics: TopicBasic[];
 }
+interface ScoreInfo {
+  score?: number;
+  comprehension_estimate?: string;
+}
 interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  scoreInfo?: ScoreInfo | null;
 }
 
 const SESSION_TYPES = [
@@ -169,10 +174,21 @@ export default function SessaoPage() {
         role: "assistant",
         content: data.response,
         timestamp: new Date(),
+        scoreInfo: data.performance_snapshot ?? null,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (e) {
-      setError((e as Error).message);
+      const errMsg = (e as Error).message;
+      // Mensagens de erro contextuais
+      if (errMsg.includes("Limite atingido") || errMsg.includes("máximo de")) {
+        setError("Atingiste o limite de sessões por hora. Faz uma pausa e tenta novamente em alguns minutos.");
+      } else if (errMsg.includes("Limite de custo")) {
+        setError("O sistema atingiu o limite diário de utilização. Contacta o teu professor.");
+      } else if (errMsg.includes("atingiu o limite")) {
+        setError("Esta conversa ficou muito longa. Clica em \"Nova sessão\" para iniciar uma nova.");
+      } else {
+        setError(errMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -398,6 +414,21 @@ export default function SessaoPage() {
 
         {/* Área de conversa */}
         <main className="flex-1 flex flex-col min-w-0 border-x border-border lg:border-l-0 bg-card overflow-hidden">
+          {/* Indicador de sessão ativa */}
+          {sessionId && messages.length > 0 && (
+            <div className="flex items-center justify-between px-3 sm:px-4 py-1.5 bg-accent/50 border-b border-border text-xs text-muted-foreground">
+              <span>
+                {currentTypeIcon} {currentTypeLabel} · {messages.length} {messages.length === 1 ? "mensagem" : "mensagens"}
+              </span>
+              <button
+                onClick={resetSession}
+                className="text-primary hover:underline"
+              >
+                Terminar e iniciar nova
+              </button>
+            </div>
+          )}
+
           {/* Mensagens */}
           <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
             {messages.length === 0 && (
@@ -440,17 +471,29 @@ export default function SessaoPage() {
                       </ReactMarkdown>
                     </div>
                   )}
-                  <div
-                    className={`text-xs mt-1 ${
-                      msg.role === "user"
-                        ? "text-primary-foreground/60"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    {msg.timestamp.toLocaleTimeString("pt-PT", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                  <div className={`flex items-center gap-2 text-xs mt-1 ${
+                    msg.role === "user" ? "text-primary-foreground/60" : "text-muted-foreground"
+                  }`}>
+                    <span>
+                      {msg.timestamp.toLocaleTimeString("pt-PT", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    {/* Feedback visual do score (só mensagens do assistente) */}
+                    {msg.role === "assistant" && msg.scoreInfo?.score != null && (
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${
+                        msg.scoreInfo.score >= 4
+                          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                          : msg.scoreInfo.score >= 3
+                            ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+                            : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+                      }`}>
+                        {msg.scoreInfo.score >= 4 ? "Boa compreensão" :
+                         msg.scoreInfo.score >= 3 ? "Compreensão parcial" :
+                         "Precisa de reforço"}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -475,13 +518,18 @@ export default function SessaoPage() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
+          {/* Input (textarea expansível) */}
           <div className="border-t border-border p-2 sm:p-3">
-            <div className="flex gap-2">
-              <input
-                type="text"
+            <div className="flex gap-2 items-end">
+              <textarea
                 value={userQuestion}
-                onChange={(e) => setUserQuestion(e.target.value)}
+                onChange={(e) => {
+                  setUserQuestion(e.target.value);
+                  // Auto-resize: ajusta a altura ao conteúdo (min 1 linha, max 8)
+                  const el = e.target;
+                  el.style.height = "auto";
+                  el.style.height = Math.min(el.scrollHeight, 192) + "px";
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && !loading) {
                     e.preventDefault();
@@ -490,16 +538,18 @@ export default function SessaoPage() {
                 }}
                 placeholder={
                   sessionId
-                    ? "Continuar a conversa..."
-                    : `Dúvida ou pedido (${currentTypeLabel})`
+                    ? "Continuar a conversa... (Shift+Enter para nova linha)"
+                    : `Escreve a tua dúvida ou resposta... (${currentTypeLabel})`
                 }
-                className="flex-1 border border-border rounded px-3 py-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                className="flex-1 border border-border rounded px-3 py-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary resize-none overflow-y-auto"
+                style={{ minHeight: "40px", maxHeight: "192px" }}
+                rows={1}
                 disabled={loading}
               />
               <button
                 onClick={sendMessage}
                 disabled={loading || !student}
-                className="bg-primary text-primary-foreground px-3 sm:px-4 py-2 rounded text-sm font-medium disabled:opacity-50 hover:bg-primary/90 transition-colors shrink-0"
+                className="bg-primary text-primary-foreground px-3 sm:px-4 py-2 rounded text-sm font-medium disabled:opacity-50 hover:bg-primary/90 transition-colors shrink-0 self-end"
               >
                 {loading ? "..." : "Enviar"}
               </button>

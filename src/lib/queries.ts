@@ -266,3 +266,98 @@ export async function studentOverallMastery(
   const att = (data ?? []).reduce((s, r) => s + r.attempts, 0);
   return { avg: sum / ae, attempts: att, ae };
 }
+
+/**
+ * Sessões recentes de tutoria para um aluno (últimas N).
+ */
+export async function recentSessions(
+  studentId: string,
+  limit = 10,
+): Promise<
+  Array<{
+    id: string;
+    session_type: string;
+    created_at: string;
+    cost_usd: number | null;
+    performance_snapshot: Record<string, unknown> | null;
+    input_tokens: number | null;
+    output_tokens: number | null;
+  }>
+> {
+  const db = supabaseServer();
+  const { data, error } = await db
+    .from('tutor_sessions')
+    .select('id, session_type, created_at, cost_usd, performance_snapshot, input_tokens, output_tokens')
+    .eq('student_id', studentId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as Array<{
+    id: string;
+    session_type: string;
+    created_at: string;
+    cost_usd: number | null;
+    performance_snapshot: Record<string, unknown> | null;
+    input_tokens: number | null;
+    output_tokens: number | null;
+  }>;
+}
+
+/**
+ * Estatísticas globais de sessões (para o dashboard do supervisor).
+ */
+export async function sessionStats(): Promise<{
+  totalSessions: number;
+  totalCostUsd: number;
+  todaySessions: number;
+  todayCostUsd: number;
+  byType: Record<string, number>;
+  recentActivity: Array<{
+    id: string;
+    session_type: string;
+    created_at: string;
+    cost_usd: number | null;
+    student_id: string;
+  }>;
+}> {
+  const db = supabaseServer();
+
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  const [allRes, todayRes, recentRes] = await Promise.all([
+    db.from('tutor_sessions').select('session_type, cost_usd'),
+    db.from('tutor_sessions').select('cost_usd').gte('created_at', todayStart.toISOString()),
+    db.from('tutor_sessions')
+      .select('id, session_type, created_at, cost_usd, student_id')
+      .order('created_at', { ascending: false })
+      .limit(15),
+  ]);
+
+  const all = (allRes.data ?? []) as Array<{ session_type: string; cost_usd: number | null }>;
+  const today = (todayRes.data ?? []) as Array<{ cost_usd: number | null }>;
+  const recent = (recentRes.data ?? []) as Array<{
+    id: string; session_type: string; created_at: string; cost_usd: number | null; student_id: string;
+  }>;
+
+  const byType: Record<string, number> = {};
+  let totalCost = 0;
+  for (const s of all) {
+    byType[s.session_type] = (byType[s.session_type] ?? 0) + 1;
+    totalCost += Number(s.cost_usd ?? 0);
+  }
+
+  let todayCost = 0;
+  for (const s of today) {
+    todayCost += Number(s.cost_usd ?? 0);
+  }
+
+  return {
+    totalSessions: all.length,
+    totalCostUsd: totalCost,
+    todaySessions: today.length,
+    todayCostUsd: todayCost,
+    byType,
+    recentActivity: recent,
+  };
+}

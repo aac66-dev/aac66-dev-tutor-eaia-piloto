@@ -7,6 +7,7 @@ import {
   listCurricula,
   masteryByCurriculum,
   studentOverallMastery,
+  recentSessions,
 } from '@/lib/queries';
 import { masteryBandLabel } from '@/lib/types';
 
@@ -21,10 +22,11 @@ export default async function StudentDashboardPage({ params }: PageProps) {
   const student = await getStudentByNickname(params.nickname);
   if (!student) notFound();
 
-  const [curricula, masteryMap, overall] = await Promise.all([
+  const [curricula, masteryMap, overall, sessions] = await Promise.all([
     listCurricula(),
     masteryByCurriculum(student.id),
     studentOverallMastery(student.id),
+    recentSessions(student.id, 10),
   ]);
 
   const portugues = curricula.filter((c) => c.discipline_code === 'PT');
@@ -127,6 +129,74 @@ export default async function StudentDashboardPage({ params }: PageProps) {
             📚 Iniciar sessão de tutoria
           </a>
         </section>
+
+        {/* Histórico de sessões recentes */}
+        {sessions.length > 0 && (
+          <section>
+            <h2 className="text-xl font-serif font-semibold mb-3">
+              Sessões recentes
+            </h2>
+            <div className="rounded-lg border border-border bg-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-accent/50 text-muted-foreground text-left">
+                      <th className="px-3 py-2 font-medium">Data</th>
+                      <th className="px-3 py-2 font-medium">Tipo</th>
+                      <th className="px-3 py-2 font-medium">Score</th>
+                      <th className="px-3 py-2 font-medium">Compreensão</th>
+                      <th className="px-3 py-2 font-medium text-right">Custo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessions.map((s) => {
+                      const dt = new Date(s.created_at);
+                      const dateStr = dt.toLocaleDateString('pt-PT', {
+                        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                      });
+                      const typeLabels: Record<string, string> = {
+                        explicacao: '📖 Explicação',
+                        resumo: '📋 Resumo',
+                        quiz: '❓ Quiz',
+                        teste: '📝 Teste',
+                        exame: '🎓 Exame',
+                        revisao: '🔄 Revisão',
+                      };
+                      const ps = s.performance_snapshot;
+                      const score = ps?.score != null ? Number(ps.score) : null;
+                      const comp = ps?.comprehension_estimate as string | undefined;
+                      return (
+                        <tr key={s.id} className="border-b border-border last:border-0 hover:bg-accent/30">
+                          <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{dateStr}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{typeLabels[s.session_type] ?? s.session_type}</td>
+                          <td className="px-3 py-2">
+                            {score != null ? (
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
+                                score >= 4
+                                  ? 'bg-green-100 text-green-800'
+                                  : score >= 3
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {score}/5
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">{comp ?? '—'}</td>
+                          <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                            {s.cost_usd != null ? `$${Number(s.cost_usd).toFixed(4)}` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">
           <p>

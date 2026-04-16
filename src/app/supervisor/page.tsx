@@ -5,6 +5,7 @@ import {
   listStudents,
   listCurricula,
   studentOverallMastery,
+  sessionStats,
 } from '@/lib/queries';
 import { masteryBandLabel } from '@/lib/types';
 
@@ -12,14 +13,30 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export default async function SupervisorPage() {
-  const [students, curricula] = await Promise.all([
+  const [students, curricula, stats] = await Promise.all([
     listStudents(),
     listCurricula(),
+    sessionStats(),
   ]);
 
   const overalls = await Promise.all(
     students.map((s) => studentOverallMastery(s.id)),
   );
+
+  // Mapear student_id → nickname para a actividade recente
+  const nickById: Record<string, string> = {};
+  for (const s of students) {
+    nickById[s.id] = s.nickname ?? s.full_name;
+  }
+
+  const typeLabels: Record<string, string> = {
+    explicacao: '📖 Explicação',
+    resumo: '📋 Resumo',
+    quiz: '❓ Quiz',
+    teste: '📝 Teste',
+    exame: '🎓 Exame',
+    revisao: '🔄 Revisão',
+  };
 
   return (
     <AppShell breadcrumb={[{ label: 'Supervisor' }]}>
@@ -102,6 +119,88 @@ export default async function SupervisorPage() {
               );
             })}
           </div>
+        </section>
+
+        {/* Painel de actividade e custos */}
+        <section>
+          <h2 className="text-xl font-serif font-semibold mb-4">
+            Actividade e custos
+          </h2>
+
+          {/* KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">Total de sessões</p>
+              <p className="text-2xl font-semibold tabular-nums mt-1">{stats.totalSessions}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">Custo total</p>
+              <p className="text-2xl font-semibold tabular-nums mt-1">${stats.totalCostUsd.toFixed(4)}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">Sessões hoje</p>
+              <p className="text-2xl font-semibold tabular-nums mt-1">{stats.todaySessions}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">Custo hoje</p>
+              <p className="text-2xl font-semibold tabular-nums mt-1">${stats.todayCostUsd.toFixed(4)}</p>
+              <p className="text-xs text-muted-foreground mt-1">Limite: $5.00/dia</p>
+            </div>
+          </div>
+
+          {/* Distribuição por tipo */}
+          {Object.keys(stats.byType).length > 0 && (
+            <div className="rounded-lg border border-border bg-card p-4 mb-4">
+              <p className="text-xs text-muted-foreground mb-2">Sessões por tipo</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(stats.byType).map(([type, count]) => (
+                  <span key={type} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-accent text-sm">
+                    {typeLabels[type] ?? type}
+                    <span className="font-semibold tabular-nums">{count}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Actividade recente */}
+          {stats.recentActivity.length > 0 && (
+            <div className="rounded-lg border border-border bg-card overflow-hidden">
+              <div className="px-4 py-2 border-b border-border bg-accent/50">
+                <p className="text-sm font-medium text-muted-foreground">Últimas sessões</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground text-left">
+                      <th className="px-3 py-2 font-medium">Hora</th>
+                      <th className="px-3 py-2 font-medium">Aluno</th>
+                      <th className="px-3 py-2 font-medium">Tipo</th>
+                      <th className="px-3 py-2 font-medium text-right">Custo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.recentActivity.map((s) => {
+                      const dt = new Date(s.created_at);
+                      const timeStr = dt.toLocaleDateString('pt-PT', {
+                        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                      });
+                      return (
+                        <tr key={s.id} className="border-b border-border last:border-0 hover:bg-accent/30">
+                          <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{timeStr}</td>
+                          <td className="px-3 py-2 font-medium">{nickById[s.student_id] ?? '?'}</td>
+                          <td className="px-3 py-2">{typeLabels[s.session_type] ?? s.session_type}</td>
+                          <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                            {s.cost_usd != null ? `$${Number(s.cost_usd).toFixed(4)}` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </section>
 
         <section>
