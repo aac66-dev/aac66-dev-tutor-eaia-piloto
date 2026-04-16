@@ -290,6 +290,64 @@ function buildUserPrompt(
   );
 }
 
+// ── rate limiting & cost protection ─────────────────────────────────
+const RATE_LIMITS = {
+  MAX_SESSIONS_PER_STUDENT_PER_HOUR: 20,
+  MAX_MESSAGES_PER_SESSION: 30,
+  MAX_DAILY_COST_USD: 5.0,
+} as const;
+
+async function checkRateLimits(
+  supabase: SupabaseAny,
+  studentId: string,
+  sessionId?: string,
+): Promise<string | null> {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const todayIso = todayStart.toISOString();
+
+  // 1. Sessões por aluno na última hora
+  const { count: sessionCount } = await supabase
+    .from("tutor_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("student_id", studentId)
+    .gte("created_at", oneHourAgo) as { count: number | null };
+
+  if ((sessionCount ?? 0) >= RATE_LIMITS.MAX_SESSIONS_PER_STUDENT_PER_HOUR) {
+    return `Limite atingido: máximo de ${RATE_LIMITS.MAX_SESSIONS_PER_STUDENT_PER_HOUR} sessões por hora. Aguarda um pouco antes de continuar.`;
+  }
+
+  // 2. Mensagens por sessão (multi-turn)
+  if (sessionId) {
+    const { count: msgCount } = await supabase
+      .from("session_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("session_id", sessionId) as { count: number | null };
+
+    if ((msgCount ?? 0) >= RATE_LIMITS.MAX_MESSAGES_PER_SESSION) {
+      return `Esta sessão atingiu o limite de ${RATE_LIMITS.MAX_MESSAGES_PER_SESSION} mensagens. Inicia uma nova sessão para continuar.`;
+    }
+  }
+
+  // 3. Custo diário global
+  const { data: costData } = await supabase
+    .from("tutor_sessions")
+    .select("cost_usd")
+    .gte("created_at", todayIso) as { data: { cost_usd: number }[] | null };
+
+  const dailyCost = (costData ?? []).reduce(
+    (sum: number, r: { cost_usd: number }) => sum + (Number(r.cost_usd) || 0),
+    0,
+  );
+
+  if (dailyCost >= RATE_LIMITS.MAX_DAILY_COST_USD) {
+    return `Limite de custo diário atingido ($${RATE_LIMITS.MAX_DAILY_COST_USD.toFixed(2)}). Contacta o administrador para aumentar o limite.`;
+  }
+
+  return null; // sem limite atingido
+}
+
 // ── handler ──────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -335,6 +393,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "student_id e session_type são obrigatórios" },
       { status: 400 }
+    );
+  }
+
+  // Rate limiting e proteção de custos
+  const rateLimitError = await checkRateLimits(supabase as SupabaseAny, student_id, session_id);
+  if (rateLimitError) {
+    return NextResponse.json(
+      { error: rateLimitError },
+      { status: 429 }
     );
   }
 
