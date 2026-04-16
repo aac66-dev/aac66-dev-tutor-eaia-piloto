@@ -112,6 +112,15 @@ export default function SessaoPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Se o exame estava selecionado e o currículo mudou para um sem exame, reverter
+  const selectedCurrSlug = curricula.find((c) => c.id === selectedCurriculum)?.slug ?? "";
+  const exameDisponivel = CURRICULOS_COM_EXAME.has(selectedCurrSlug);
+  useEffect(() => {
+    if (sessionType === "exame" && selectedCurriculum && !exameDisponivel) {
+      setSessionType("explicacao");
+    }
+  }, [selectedCurriculum, exameDisponivel, sessionType]);
+
   // fechar sidebar ao clicar fora (mobile)
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
@@ -194,15 +203,6 @@ export default function SessaoPage() {
   }
 
   const availableTopics = unitsTopics.find((ut) => ut.unit.id === selectedUnit)?.topics ?? [];
-  const selectedCurrSlug = curricula.find((c) => c.id === selectedCurriculum)?.slug ?? "";
-  const exameDisponivel = CURRICULOS_COM_EXAME.has(selectedCurrSlug);
-
-  // Se o exame estava selecionado e o currículo mudou para um sem exame, reverter para explicação
-  useEffect(() => {
-    if (sessionType === "exame" && selectedCurriculum && !exameDisponivel) {
-      setSessionType("explicacao");
-    }
-  }, [selectedCurriculum, exameDisponivel, sessionType]);
 
   const visibleTypes = SESSION_TYPES.filter(
     (t) => t.key !== "exame" || exameDisponivel || !selectedCurriculum,
