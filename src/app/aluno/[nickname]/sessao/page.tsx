@@ -38,11 +38,18 @@ interface Message {
 
 const SESSION_TYPES = [
   { key: "explicacao", label: "Explicação", icon: "📖", desc: "Explicação clara do tópico, do simples ao complexo" },
-  { key: "revisao", label: "Revisão", icon: "🔄", desc: "Resumo dos pontos-chave para avaliação" },
-  { key: "quiz", label: "Quiz", icon: "❓", desc: "5 perguntas de escolha múltipla com respostas" },
-  { key: "exame", label: "Exame", icon: "📝", desc: "Simulação de pergunta de exame com feedback" },
-  { key: "resumo", label: "Resumo", icon: "📋", desc: "Resumo estruturado e conciso do tópico" },
+  { key: "resumo", label: "Resumo", icon: "📋", desc: "Resumo estruturado e conciso para estudar" },
+  { key: "quiz", label: "Quiz", icon: "❓", desc: "Perguntas rápidas de escolha múltipla para revisão" },
+  { key: "teste", label: "Teste", icon: "📝", desc: "Simulação de teste de aula: desenvolvimento, interpretação e aplicação" },
+  { key: "exame", label: "Exame Nacional", icon: "🎓", desc: "Simulação de prova nacional (só anos com exame)" },
 ] as const;
+
+// Slugs de currículos com exame nacional (provas finais de ciclo e exames do secundário)
+const CURRICULOS_COM_EXAME = new Set([
+  "portugues-9",
+  "matematica-9",
+  "portugues-12",
+]);
 
 // ── componente ───────────────────────────────────────────────────────
 export default function SessaoPage() {
@@ -187,6 +194,20 @@ export default function SessaoPage() {
   }
 
   const availableTopics = unitsTopics.find((ut) => ut.unit.id === selectedUnit)?.topics ?? [];
+  const selectedCurrSlug = curricula.find((c) => c.id === selectedCurriculum)?.slug ?? "";
+  const exameDisponivel = CURRICULOS_COM_EXAME.has(selectedCurrSlug);
+
+  // Se o exame estava selecionado e o currículo mudou para um sem exame, reverter para explicação
+  useEffect(() => {
+    if (sessionType === "exame" && selectedCurriculum && !exameDisponivel) {
+      setSessionType("explicacao");
+    }
+  }, [selectedCurriculum, exameDisponivel, sessionType]);
+
+  const visibleTypes = SESSION_TYPES.filter(
+    (t) => t.key !== "exame" || exameDisponivel || !selectedCurriculum,
+  );
+
   const currentTypeLabel = SESSION_TYPES.find((t) => t.key === sessionType)?.label ?? sessionType;
   const currentTypeIcon = SESSION_TYPES.find((t) => t.key === sessionType)?.icon ?? "📖";
 
@@ -199,7 +220,7 @@ export default function SessaoPage() {
           Tipo de sessão
         </label>
         <div className="space-y-1">
-          {SESSION_TYPES.map((t) => (
+          {visibleTypes.map((t) => (
             <button
               key={t.key}
               onClick={() => setSessionType(t.key)}

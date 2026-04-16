@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 // ── tipos ────────────────────────────────────────────────────────────
-type SessionType = "explicacao" | "revisao" | "exame" | "resumo" | "quiz";
+type SessionType = "explicacao" | "resumo" | "quiz" | "teste" | "exame" | "revisao";
 
 interface PromptBundle {
   student: Record<string, unknown>;
@@ -227,17 +227,26 @@ function section(title: string, body: string): string {
 }
 
 function taskInstructions(type: SessionType, question?: string): string {
-  const map: Record<SessionType, string> = {
+  const map: Record<string, string> = {
     explicacao:
-      "Explica o tópico atual de forma clara, do simples para o complexo. Relaciona com tópicos anteriores se fizer sentido.",
-    revisao:
-      "Faz um resumo de revisão do tópico atual, cobrindo os pontos-chave que costumam cair em avaliação.",
-    exame:
-      "Simula uma pergunta de exame ao nível do tópico atual, espera que o aluno responda, e depois dá feedback detalhado.",
+      "Explica o tópico atual de forma clara, do simples para o complexo. Usa exemplos concretos. Relaciona com tópicos anteriores se fizer sentido. Método socrático: guia o aluno com perguntas.",
     resumo:
-      "Produz um resumo estruturado e conciso do tópico, em máximo uma página, com headings claros e bullets curtos.",
+      "Produz um resumo estruturado e conciso do tópico, em máximo uma página, com headings claros e pontos-chave. Ideal para o aluno estudar antes de uma avaliação.",
     quiz:
-      "Gera 5 perguntas de escolha múltipla sobre o tópico, com 4 opções cada, indicando a resposta correta e uma justificação curta.",
+      "Gera 5 perguntas de escolha múltipla sobre o tópico, com 4 opções cada (A, B, C, D). Indica a resposta correta e uma justificação curta para cada. Varia a dificuldade.",
+    teste:
+      "Simula um teste de aula, como o que o professor aplica em sala. Inclui uma mistura de: " +
+      "1) uma pergunta de interpretação ou análise, " +
+      "2) uma pergunta de desenvolvimento (resposta aberta, 8-12 linhas), " +
+      "3) uma pergunta de aplicação prática ou exercício. " +
+      "Apresenta as perguntas, espera que o aluno responda, e depois dá feedback detalhado com cotação simulada.",
+    exame:
+      "Simula uma pergunta de exame nacional oficial. Usa o formato, a linguagem e o nível de exigência das provas finais da DGE. " +
+      "Apresenta a pergunta com os grupos e itens característicos do exame da disciplina. " +
+      "Espera que o aluno responda e depois dá feedback com critérios de correção semelhantes aos do IAVE.",
+    // Retrocompatibilidade: se alguma sessão antiga usar "revisao", redireciona para resumo
+    revisao:
+      "Produz um resumo estruturado e conciso do tópico, em máximo uma página, com headings claros e pontos-chave. Ideal para o aluno estudar antes de uma avaliação.",
   };
   let body = map[type] || map.explicacao;
   if (question?.trim()) {
